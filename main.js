@@ -62,9 +62,167 @@ function calculateTotalLaunchesAllowed(sequence, blackHoleCount) {
 }
 
 // ---------------------------------------------------------------------------
+// Story / Mission Briefing Scene
+// The game's actual entry point: a text-only briefing screen setting up the
+// premise before handing off to the Menu. Purely presentational - no game
+// state lives here. Content is laid out top-to-bottom with a running `y`
+// cursor so each block's height (which varies with word-wrap) pushes the
+// next one down automatically, rather than using hardcoded positions.
+// ---------------------------------------------------------------------------
+class StoryScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'StoryScene' });
+  }
+
+  create() {
+    const centerX = this.scale.width / 2;
+    const contentWidth = 1100;
+    const leftX = centerX - contentWidth / 2;
+    const startY = 80;
+    let y = startY;
+
+    // Every block created below is collected here so the whole briefing can
+    // be shifted as one unit once its total height is known, centering it
+    // vertically instead of leaving it pinned to the top of a much taller
+    // 1080px canvas.
+    const allTexts = [];
+
+    const addHeading = (text, fontSize, color, marginBottom) => {
+      const t = this.add
+        .text(centerX, y, text, {
+          fontFamily: 'monospace',
+          fontSize,
+          color,
+          fontStyle: 'bold',
+          align: 'center',
+        })
+        .setOrigin(0.5, 0);
+      allTexts.push(t);
+      y += t.height + marginBottom;
+      return t;
+    };
+
+    const addSectionHeader = (text) => {
+      const t = this.add
+        .text(leftX, y, text, {
+          fontFamily: 'monospace',
+          fontSize: '24px',
+          color: '#66ddff',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0);
+      allTexts.push(t);
+      y += t.height + 10;
+      return t;
+    };
+
+    const addBody = (text) => {
+      const t = this.add
+        .text(leftX, y, text, {
+          fontFamily: 'monospace',
+          fontSize: '18px',
+          color: '#c7d0f0',
+          lineSpacing: 6,
+          wordWrap: { width: contentWidth },
+        })
+        .setOrigin(0, 0);
+      allTexts.push(t);
+      y += t.height + 26;
+      return t;
+    };
+
+    const addBullet = (text) => {
+      const t = this.add
+        .text(leftX + 24, y, `•  ${text}`, {
+          fontFamily: 'monospace',
+          fontSize: '18px',
+          color: '#c7d0f0',
+          lineSpacing: 6,
+          wordWrap: { width: contentWidth - 24 },
+        })
+        .setOrigin(0, 0);
+      allTexts.push(t);
+      y += t.height + 14;
+      return t;
+    };
+
+    addHeading('MISSION BRIEFING', '40px', '#ffffff', 50);
+
+    addSectionHeader('THE DISCOVERY');
+    addBody(
+      'Scientists have detected 8 mysterious black holes orbiting Earth. ' +
+        'Strange, sequenced signals are broadcasting from them, and we need to know why.'
+    );
+
+    addSectionHeader('THE MISSION');
+    addBody(
+      'We have launched a probe to investigate, but there is a problem: fuel is ' +
+        'critically limited. The satellite does not have enough fuel to fly to a ' +
+        'distant black hole and fly straight back.'
+    );
+    addBody(
+      "To survive, you must navigate by jumping directly from one black hole's " +
+        'orbit to the next, following the exact signal sequence.'
+    );
+
+    addSectionHeader('YOUR OBJECTIVES:');
+    addBullet('Follow the Sequence: Jump between the black holes in the exact target order provided.');
+    addBullet('Conserve Fuel: You only have a strictly limited number of engine thrusts (kick-offs). Use them wisely.');
+    addBullet("Bring it Home: Once the sequence is complete, you must safely return to Earth's orbit to transmit the data.");
+
+    y += 6;
+    addHeading('Good luck.', '22px', '#a9b6e8', 30);
+
+    // -------------------------------------------------------------------
+    // Continue prompt: blinking text, triggered by SPACE or a click/tap.
+    // -------------------------------------------------------------------
+    const continueText = this.add
+      .text(centerX, y + 10, 'PRESS SPACE TO CONTINUE', {
+        fontFamily: 'monospace',
+        fontSize: '20px',
+        color: '#66ddff',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5, 0)
+      .setInteractive({ useHandCursor: true });
+    allTexts.push(continueText);
+    y += continueText.height;
+
+    this.tweens.add({
+      targets: continueText,
+      alpha: 0.2,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    continueText.on('pointerdown', () => this.scene.start('MenuScene'));
+
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+    // Center the whole briefing block vertically: shift every text object
+    // down (or up) by the difference between its natural top offset and
+    // where a block of this total height should start to be centered.
+    const totalContentHeight = y - startY;
+    const centeredStartY = (this.scale.height - totalContentHeight) / 2;
+    const verticalShift = centeredStartY - startY;
+    allTexts.forEach((t) => {
+      t.y += verticalShift;
+    });
+  }
+
+  update() {
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.scene.start('MenuScene');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main Menu Scene
-// The game's entry point: title, brief instructions, and a prompt to start.
-// Purely presentational - no game state lives here.
+// Title screen with a prompt to start. Purely presentational - no game
+// state lives here.
 // ---------------------------------------------------------------------------
 class MenuScene extends Phaser.Scene {
   constructor() {
@@ -891,7 +1049,7 @@ const config = {
   height: 1080,
   backgroundColor: '#050510',
   parent: 'game-container',
-  scene: [MenuScene, MainScene],
+  scene: [StoryScene, MenuScene, MainScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
