@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Phaser 3 - Orbital Mechanics Demo
-// Earth (blue circle) at the center, a Satellite (red triangle) driven by a
-// custom physics state machine, and 8 Black Holes (purple circles) orbiting
-// Earth at varied speeds.
+// Earth (blue circle) at the center, spinning on its own axis. A Satellite
+// (red triangle) driven by a custom physics state machine. 8 Black Holes
+// (purple circles) sit at fixed positions around Earth and spin in place.
 //
 // No Arcade Physics is used anywhere. All motion is explicit vector math
 // computed by hand each frame (position += velocity, angle-based orbits,
@@ -21,7 +21,7 @@ const SATELLITE_STATE = {
 // ---------------------------------------------------------------------------
 let missionSequence = [];       // e.g. [3, 6, 2] - ordered target Black Hole IDs
 let currentMissionIndex = 0;    // Index into missionSequence of the current target
-let totalLaunchesAllowed = 0;   // missionSequence.length + 1
+let totalLaunchesAllowed = 0;   // missionSequence.length + 1 + opposite-pair bonus (see below)
 let launchesLeft = 0;           // Launches remaining this run
 
 // Builds a random mission: 3-5 unique Black Hole IDs drawn from
@@ -34,9 +34,40 @@ function generateMissionSequence(blackHoleCount) {
   return ids.slice(0, sequenceLength);
 }
 
+// Since the Black Holes sit evenly spaced on one ring, ID `n` is exactly
+// diametrically opposite ID `n + blackHoleCount / 2` (circular, e.g. with 8
+// holes: 1<->5, 2<->6, 3<->7, 4<->8). Flying directly across the ring wastes
+// the outbound leg's momentum on the way past Earth, so each back-to-back
+// pair of opposite targets in the sequence earns one bonus launch.
+// e.g. sequence [3, 8, 4] with 8 Black Holes: (3,8) is not opposite (diff 5),
+// (8,4) is opposite (diff 4) -> 1 bonus launch.
+function countOppositePairs(sequence, blackHoleCount) {
+  const oppositeDistance = blackHoleCount / 2;
+  let count = 0;
+
+  for (let i = 0; i < sequence.length - 1; i++) {
+    if (Math.abs(sequence[i] - sequence[i + 1]) === oppositeDistance) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+// Precomputes the launch budget for a mission: one launch per target, one
+// extra "return to Earth" launch, plus one bonus launch for every
+// consecutive opposite-side pair in the sequence.
+function calculateTotalLaunchesAllowed(sequence, blackHoleCount) {
+  return sequence.length + 1 + countOppositePairs(sequence, blackHoleCount);
+}
+
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
+
+    // --- Earth configuration ---------------------------------------------
+    this.earthRadius = 40;          // Drawn radius of Earth's circle placeholder
+    this.earthSpinSpeed = 0.4;      // Radians per second Earth spins on its own axis
 
     // --- Satellite orbit configuration ----------------------------------
     this.earthOrbitRadius = 80;     // Default orbit radius when circling Earth
@@ -50,12 +81,17 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteOrbitCenter = null; // Current parent body: Earth or a Black Hole's graphics
     this.satelliteOrbitRadius = this.earthOrbitRadius;
-    this.earthCaptureRadius = 40;     // Distance at which Earth re-captures the satellite (matches Earth's drawn radius)
+    this.earthCaptureRadius = this.earthRadius; // Distance at which Earth re-captures the satellite
 
     // --- Black hole configuration ---------------------------------------
+    // Black Holes sit at fixed positions relative to Earth (they do not
+    // orbit); they only spin in place around their own center. All 8 sit
+    // on a single ring, 1.5x Earth's diameter out from Earth's surface,
+    // evenly spaced around it so none ever overlap or sit close together.
     this.blackHoleCount = 8;
-    this.blackHoleMinRadius = 150;
-    this.blackHoleMaxRadius = 280;
+    this.blackHoleRadius = 20;      // Drawn radius of each Black Hole's circle placeholder
+    this.blackHoleDistanceFromCenter =
+      this.earthRadius + 1.5 * (this.earthRadius * 2); // surface + 1.5x Earth's diameter
     this.blackHoles = [];           // Populated in create()
 
     // --- Mission tracking -------------------------------------------------
@@ -69,16 +105,17 @@ class MainScene extends Phaser.Scene {
 
   create() {
     // -------------------------------------------------------------------
-    // Earth: a static blue circle placeholder at the center of the canvas.
+    // Earth: a blue circle placeholder at the center of the canvas. Its
+    // position is fixed; a small offset marker inside the container makes
+    // its own-axis spin visible (a plain flat-color circle wouldn't show
+    // any rotation on its own).
     // -------------------------------------------------------------------
     this.earth = { x: 400, y: 300 };
 
-    this.earthGraphics = this.add.circle(
-      this.earth.x,
-      this.earth.y,
-      40,           // radius
-      0x2266ff       // blue
-    );
+    this.earthContainer = this.add.container(this.earth.x, this.earth.y);
+    const earthBody = this.add.circle(0, 0, this.earthRadius, 0x2266ff); // blue
+    const earthMarker = this.add.circle(18, 0, 6, 0x66ddff);             // lighter "landmass" marker
+    this.earthContainer.add([earthBody, earthMarker]);
 
     // -------------------------------------------------------------------
     // Satellite: a red triangle placeholder. Phaser triangles are defined
@@ -104,18 +141,20 @@ class MainScene extends Phaser.Scene {
     this.updateSatelliteOrbit(0);
 
     // -------------------------------------------------------------------
-    // Black Holes: 8 purple circle placeholders orbiting Earth at evenly
-    // spaced radii, each with its own ID, speed, and rotation direction.
+    // Black Holes: 8 purple circle placeholders at fixed positions around
+    // Earth (evenly spaced distances), each with its own ID and spinning
+    // in place at its own speed/direction.
     // -------------------------------------------------------------------
     this.createBlackHoles();
 
     // -------------------------------------------------------------------
     // Mission: pick a random ordered sequence of Black Hole IDs to visit,
-    // and derive the launch budget from its length.
+    // and precompute the launch budget from its length (plus bonus
+    // launches for consecutive opposite-side targets).
     // -------------------------------------------------------------------
     missionSequence = generateMissionSequence(this.blackHoleCount);
     currentMissionIndex = 0;
-    totalLaunchesAllowed = missionSequence.length + 1;
+    totalLaunchesAllowed = calculateTotalLaunchesAllowed(missionSequence, this.blackHoleCount);
     launchesLeft = totalLaunchesAllowed;
 
     // -------------------------------------------------------------------
@@ -156,32 +195,39 @@ class MainScene extends Phaser.Scene {
   }
 
   // -----------------------------------------------------------------------
-  // Builds the 8 Black Hole orbiters: evenly spaced radii between
-  // blackHoleMinRadius and blackHoleMaxRadius, a unique ID (1-8), a random
-  // slow angular velocity, and a random initial rotation direction.
+  // Builds the 8 Black Holes at fixed positions relative to Earth, all on
+  // a single ring at blackHoleDistanceFromCenter, evenly spaced by angle
+  // (360 / count degrees apart) so they can never overlap or sit close to
+  // one another. The whole ring gets one random rotation offset so the
+  // layout isn't identical every run. Each Black Hole spins in place at
+  // its own slow, random speed/direction — it does not travel around Earth.
   // -----------------------------------------------------------------------
   createBlackHoles() {
     const count = this.blackHoleCount;
-    // Step between consecutive radii so they are evenly distributed across
-    // the full [min, max] range (inclusive), keeping every orbit distinct.
-    const radiusStep =
-      count > 1
-        ? (this.blackHoleMaxRadius - this.blackHoleMinRadius) / (count - 1)
-        : 0;
+    const angleStep = (Math.PI * 2) / count;
+    const ringOffset = Math.random() * Math.PI * 2; // rotates the whole ring, keeps even spacing
 
     for (let i = 0; i < count; i++) {
       const id = i + 1;
-      const orbitRadius = this.blackHoleMinRadius + radiusStep * i;
+      const distanceFromEarth = this.blackHoleDistanceFromCenter;
+      const positionAngle = ringOffset + angleStep * i;
 
-      // Random speed in [0.005, 0.015] rad/frame, random initial angle,
-      // and a random direction (+1 clockwise / -1 counterclockwise).
-      const speed = Phaser.Math.FloatBetween(0.005, 0.015);
-      const direction = Math.random() < 0.5 ? -1 : 1;
-      const startAngle = Math.random() * Math.PI * 2;
+      // Fixed world position, computed once and never updated again.
+      const x = this.earth.x + distanceFromEarth * Math.cos(positionAngle);
+      const y = this.earth.y + distanceFromEarth * Math.sin(positionAngle);
 
-      const graphics = this.add.circle(0, 0, 20, 0x9933ff); // purple
+      // Random spin speed in [0.005, 0.015] rad/frame and a random
+      // direction (+1 clockwise / -1 counterclockwise) for its own-axis
+      // rotation.
+      const spinRate = Phaser.Math.FloatBetween(0.005, 0.015);
+      const spinDirection = Math.random() < 0.5 ? -1 : 1;
 
-      const label = this.add.text(0, 0, String(id), {
+      const container = this.add.container(x, y);
+      const body = this.add.circle(0, 0, this.blackHoleRadius, 0x9933ff); // purple
+      const marker = this.add.circle(12, 0, 4, 0xe0c3ff);                 // spin indicator
+      container.add([body, marker]);
+
+      const label = this.add.text(x, y, String(id), {
         fontSize: '14px',
         color: '#ffffff',
         fontStyle: 'bold',
@@ -190,15 +236,17 @@ class MainScene extends Phaser.Scene {
 
       const blackHole = {
         id,
-        orbitRadius,
-        angle: startAngle,
-        angularVelocity: speed * direction,
-        graphics,
+        x,
+        y,
+        distanceFromEarth,
+        positionAngle,
+        spinAngle: 0,
+        spinSpeed: spinRate * spinDirection,
+        container,
         label,
       };
 
       this.blackHoles.push(blackHole);
-      this.updateBlackHolePosition(blackHole);
     }
   }
 
@@ -214,17 +262,14 @@ class MainScene extends Phaser.Scene {
       return;
     }
 
-    // Advance each Black Hole independently along its own orbit around Earth.
+    // Earth spins on its own axis; its position never changes.
+    this.earthContainer.rotation += this.earthSpinSpeed * (delta / 1000);
+
+    // Each Black Hole spins in place on its own axis; its position never
+    // changes (they do not orbit Earth).
     for (const blackHole of this.blackHoles) {
-      blackHole.angle += blackHole.angularVelocity;
-
-      if (blackHole.angle > Math.PI * 2) {
-        blackHole.angle -= Math.PI * 2;
-      } else if (blackHole.angle < -Math.PI * 2) {
-        blackHole.angle += Math.PI * 2;
-      }
-
-      this.updateBlackHolePosition(blackHole);
+      blackHole.spinAngle += blackHole.spinSpeed;
+      blackHole.container.rotation = blackHole.spinAngle;
     }
 
     // Launch the satellite on SPACEBAR, only while it is orbiting and a
@@ -306,8 +351,8 @@ class MainScene extends Phaser.Scene {
       const distance = Phaser.Math.Distance.Between(
         this.satellite.x,
         this.satellite.y,
-        blackHole.graphics.x,
-        blackHole.graphics.y
+        blackHole.x,
+        blackHole.y
       );
 
       if (distance < this.captureRadius) {
@@ -353,16 +398,18 @@ class MainScene extends Phaser.Scene {
   // moment of capture so there is no visual snap.
   // -----------------------------------------------------------------------
   captureSatelliteToBlackHole(blackHole) {
-    this.satelliteOrbitCenter = blackHole.graphics;
+    // Black Holes are stationary, so a plain {x, y} reference is a stable
+    // orbit center (unlike the satellite's own orbit, this one never moves).
+    this.satelliteOrbitCenter = blackHole;
     this.satelliteOrbitRadius = Phaser.Math.Distance.Between(
       this.satellite.x,
       this.satellite.y,
-      blackHole.graphics.x,
-      blackHole.graphics.y
+      blackHole.x,
+      blackHole.y
     );
     this.angle = Math.atan2(
-      this.satellite.y - blackHole.graphics.y,
-      this.satellite.x - blackHole.graphics.x
+      this.satellite.y - blackHole.y,
+      this.satellite.x - blackHole.x
     );
 
     this.satelliteVelocity = { x: 0, y: 0 };
@@ -485,43 +532,41 @@ class MainScene extends Phaser.Scene {
   // -----------------------------------------------------------------------
   // Fully resets the run: a new random mission sequence, a refreshed
   // launch counter, the satellite back on its starting Earth orbit, and
-  // every Black Hole re-randomized onto its (fixed-radius) orbit.
+  // every Black Hole re-randomized onto the same evenly-spaced ring (a
+  // fresh random rotation offset, still guaranteeing no overlap) with a
+  // fresh spin speed/direction.
   // -----------------------------------------------------------------------
   restartGame() {
     missionSequence = generateMissionSequence(this.blackHoleCount);
     currentMissionIndex = 0;
-    totalLaunchesAllowed = missionSequence.length + 1;
+    totalLaunchesAllowed = calculateTotalLaunchesAllowed(missionSequence, this.blackHoleCount);
     launchesLeft = totalLaunchesAllowed;
 
     this.resetSatelliteToEarthOrbit();
     this.updateSatelliteOrbit(0);
 
-    for (const blackHole of this.blackHoles) {
-      blackHole.angle = Math.random() * Math.PI * 2;
-      const speed = Phaser.Math.FloatBetween(0.005, 0.015);
-      const direction = Math.random() < 0.5 ? -1 : 1;
-      blackHole.angularVelocity = speed * direction;
-      this.updateBlackHolePosition(blackHole);
-    }
+    const angleStep = (Math.PI * 2) / this.blackHoleCount;
+    const ringOffset = Math.random() * Math.PI * 2;
+
+    this.blackHoles.forEach((blackHole, i) => {
+      blackHole.positionAngle = ringOffset + angleStep * i;
+      blackHole.x = this.earth.x + blackHole.distanceFromEarth * Math.cos(blackHole.positionAngle);
+      blackHole.y = this.earth.y + blackHole.distanceFromEarth * Math.sin(blackHole.positionAngle);
+
+      blackHole.container.x = blackHole.x;
+      blackHole.container.y = blackHole.y;
+      blackHole.label.x = blackHole.x;
+      blackHole.label.y = blackHole.y;
+
+      blackHole.spinAngle = 0;
+      const spinRate = Phaser.Math.FloatBetween(0.005, 0.015);
+      const spinDirection = Math.random() < 0.5 ? -1 : 1;
+      blackHole.spinSpeed = spinRate * spinDirection;
+    });
 
     this.endScreenText.setVisible(false);
     this.gameState = 'PLAYING';
     this.refreshMissionUI();
-  }
-
-  // -----------------------------------------------------------------------
-  // Positions a single Black Hole's circle and its ID label on its orbit,
-  // keeping the label centered on top of the placeholder each frame.
-  // -----------------------------------------------------------------------
-  updateBlackHolePosition(blackHole) {
-    const x = this.earth.x + blackHole.orbitRadius * Math.cos(blackHole.angle);
-    const y = this.earth.y + blackHole.orbitRadius * Math.sin(blackHole.angle);
-
-    blackHole.graphics.x = x;
-    blackHole.graphics.y = y;
-
-    blackHole.label.x = x;
-    blackHole.label.y = y;
   }
 }
 
