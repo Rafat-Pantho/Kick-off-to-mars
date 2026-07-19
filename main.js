@@ -61,6 +61,124 @@ function calculateTotalLaunchesAllowed(sequence, blackHoleCount) {
   return sequence.length + 1 + countOppositePairs(sequence, blackHoleCount);
 }
 
+// ---------------------------------------------------------------------------
+// Main Menu Scene
+// The game's entry point: title, brief instructions, and a prompt to start.
+// Purely presentational - no game state lives here.
+// ---------------------------------------------------------------------------
+class MenuScene extends Phaser.Scene {
+  constructor() {
+    super({ key: 'MenuScene' });
+  }
+
+  create() {
+    const centerX = this.scale.width / 2;
+    const centerY = this.scale.height / 2;
+
+    // -------------------------------------------------------------------
+    // Decorative preview: a spinning Earth with a couple of stationary
+    // Black Hole placeholders on a ring, echoing the actual gameplay scene.
+    // -------------------------------------------------------------------
+    const previewY = centerY - 120;
+
+    const earthContainer = this.add.container(centerX, previewY);
+    const earthBody = this.add.circle(0, 0, 36, 0x2266ff);
+    const earthMarker = this.add.circle(16, 0, 5, 0x66ddff);
+    earthContainer.add([earthBody, earthMarker]);
+    this.tweens.add({
+      targets: earthContainer,
+      rotation: Math.PI * 2,
+      duration: 6000,
+      repeat: -1,
+      ease: 'Linear',
+    });
+
+    const previewBlackHoleCount = 4;
+    const previewRadius = 100;
+    for (let i = 0; i < previewBlackHoleCount; i++) {
+      const angle = (Math.PI * 2 * i) / previewBlackHoleCount;
+      const x = centerX + previewRadius * Math.cos(angle);
+      const y = previewY + previewRadius * Math.sin(angle);
+      const holeContainer = this.add.container(x, y);
+      const holeBody = this.add.circle(0, 0, 14, 0x9933ff);
+      const holeMarker = this.add.circle(8, 0, 3, 0xe0c3ff);
+      holeContainer.add([holeBody, holeMarker]);
+      this.tweens.add({
+        targets: holeContainer,
+        rotation: Math.PI * 2 * (i % 2 === 0 ? 1 : -1),
+        duration: 3000 + i * 400,
+        repeat: -1,
+        ease: 'Linear',
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // Title and instructions.
+    // -------------------------------------------------------------------
+    this.add
+      .text(centerX, previewY + 150, 'KICK OFF TO MARS', {
+        fontFamily: 'monospace',
+        fontSize: '40px',
+        color: '#ffffff',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5, 0.5);
+
+    this.add
+      .text(
+        centerX,
+        previewY + 200,
+        'Dock the Satellite at every mission target, then return to Earth.',
+        {
+          fontFamily: 'monospace',
+          fontSize: '15px',
+          color: '#a9b6e8',
+        }
+      )
+      .setOrigin(0.5, 0.5);
+
+    this.add
+      .text(centerX, previewY + 228, 'SPACE — Launch     R — Restart', {
+        fontFamily: 'monospace',
+        fontSize: '15px',
+        color: '#a9b6e8',
+      })
+      .setOrigin(0.5, 0.5);
+
+    // -------------------------------------------------------------------
+    // Start prompt: blinking text, triggered by SPACE or a click/tap.
+    // -------------------------------------------------------------------
+    const startText = this.add
+      .text(centerX, previewY + 280, 'PRESS SPACE TO START', {
+        fontFamily: 'monospace',
+        fontSize: '20px',
+        color: '#66ddff',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5, 0.5)
+      .setInteractive({ useHandCursor: true });
+
+    this.tweens.add({
+      targets: startText,
+      alpha: 0.2,
+      duration: 700,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    startText.on('pointerdown', () => this.scene.start('MainScene'));
+
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+  }
+
+  update() {
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.scene.start('MainScene');
+    }
+  }
+}
+
 class MainScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MainScene' });
@@ -77,11 +195,14 @@ class MainScene extends Phaser.Scene {
     // --- Satellite flight (state machine) configuration -----------------
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteFlightSpeed = 250; // Pixels per second while FLYING
-    this.captureRadius = 25;         // Distance at which a Black Hole captures the satellite
     this.satelliteVelocity = { x: 0, y: 0 };
-    this.satelliteOrbitCenter = null; // Current parent body: Earth or a Black Hole's graphics
+    this.satelliteOrbitCenter = null; // Current parent body: Earth or a Black Hole
     this.satelliteOrbitRadius = this.earthOrbitRadius;
-    this.earthCaptureRadius = this.earthRadius; // Distance at which Earth re-captures the satellite
+    // The satellite re-docks with a body the instant it enters that body's
+    // orbit ring, so the capture threshold IS the visible orbit radius -
+    // docking always happens at a comfortable, non-overlapping distance
+    // from the surface, never right on top of it.
+    this.earthCaptureRadius = this.earthOrbitRadius;
 
     // --- Black hole configuration ---------------------------------------
     // Black Holes sit at fixed positions relative to Earth (they do not
@@ -92,6 +213,7 @@ class MainScene extends Phaser.Scene {
     this.blackHoleRadius = 20;      // Drawn radius of each Black Hole's circle placeholder
     this.blackHoleDistanceFromCenter =
       this.earthRadius + 1.5 * (this.earthRadius * 2); // surface + 1.5x Earth's diameter
+    this.blackHoleOrbitRadius = this.blackHoleRadius + 30; // satellite's docking ring: 30px out from the surface
     this.blackHoles = [];           // Populated in create()
 
     // --- Mission tracking -------------------------------------------------
@@ -103,36 +225,66 @@ class MainScene extends Phaser.Scene {
     this.gameState = 'PLAYING';
   }
 
+  // -----------------------------------------------------------------------
+  // Attempts to load the real art from res/. Any file that's missing just
+  // fails its individual request (404) - the loader still completes and
+  // create() falls back to the primitive-shape placeholders for that asset.
+  // -----------------------------------------------------------------------
+  preload() {
+    this.load.image('earthImg', 'res/earth.png');
+    this.load.image('blackholeImg', 'res/blackhole.png');
+    this.load.image('satelliteImg', 'res/satellite.png');
+  }
+
   create() {
     // -------------------------------------------------------------------
-    // Earth: a blue circle placeholder at the center of the canvas. Its
-    // position is fixed; a small offset marker inside the container makes
-    // its own-axis spin visible (a plain flat-color circle wouldn't show
-    // any rotation on its own).
+    // Earth: uses res/earth.png (scaled to the same diameter as the old
+    // placeholder circle) if it loaded, otherwise falls back to a blue
+    // circle with a small offset "landmass" marker so its own-axis spin
+    // is still visible. Its position is fixed.
     // -------------------------------------------------------------------
     this.earth = { x: 400, y: 300 };
 
     this.earthContainer = this.add.container(this.earth.x, this.earth.y);
-    const earthBody = this.add.circle(0, 0, this.earthRadius, 0x2266ff); // blue
-    const earthMarker = this.add.circle(18, 0, 6, 0x66ddff);             // lighter "landmass" marker
-    this.earthContainer.add([earthBody, earthMarker]);
+    if (this.textures.exists('earthImg')) {
+      const earthSprite = this.add.image(0, 0, 'earthImg');
+      earthSprite.setDisplaySize(this.earthRadius * 2, this.earthRadius * 2);
+      this.earthContainer.add(earthSprite);
+    } else {
+      const earthBody = this.add.circle(0, 0, this.earthRadius, 0x2266ff); // blue
+      const earthMarker = this.add.circle(18, 0, 6, 0x66ddff);             // lighter "landmass" marker
+      this.earthContainer.add([earthBody, earthMarker]);
+    }
+
+    // Visible orbit ring: shows exactly where the satellite settles around
+    // Earth (and where flying back into range re-docks it), a comfortable
+    // distance out from the surface rather than right on top of it.
+    this.add
+      .circle(this.earth.x, this.earth.y, this.earthOrbitRadius)
+      .setStrokeStyle(2, 0x4477ff, 0.35);
 
     // -------------------------------------------------------------------
-    // Satellite: a red triangle placeholder. Phaser triangles are defined
-    // by three points relative to their origin; we build an isosceles
-    // triangle pointing "up" (along -y) by default, then rotate it each
-    // frame to face outward from its current orbit center / travel path.
+    // Satellite: uses res/satellite.png (scaled to match the old triangle's
+    // bounding box) if it loaded, otherwise falls back to a red triangle
+    // placeholder. Either way `this.satellite` exposes the same x/y/rotation
+    // API used everywhere else. The art is assumed to point "up" by default,
+    // same convention as the triangle's nose.
     // -------------------------------------------------------------------
     const satWidth = 16;
     const satHeight = 24;
 
-    this.satellite = this.add.triangle(
-      0, 0,                              // position set below
-      0, -satHeight / 2,                 // top point (the "nose")
-      -satWidth / 2, satHeight / 2,      // bottom-left point
-      satWidth / 2, satHeight / 2,       // bottom-right point
-      0xff3333                           // red
-    );
+    if (this.textures.exists('satelliteImg')) {
+      this.satellite = this.add.image(0, 0, 'satelliteImg');
+      this.satellite.setDisplaySize(satWidth, satHeight);
+    } else {
+      this.satellite = this.add.triangle(
+        0, 0,                              // position set below
+        0, -satHeight / 2,                 // top point (the "nose")
+        -satWidth / 2, satHeight / 2,      // bottom-left point
+        satWidth / 2, satHeight / 2,       // bottom-right point
+        0xff3333                           // red
+      );
+    }
 
     // Start orbiting Earth.
     this.satelliteOrbitCenter = this.earth;
@@ -201,11 +353,16 @@ class MainScene extends Phaser.Scene {
   // one another. The whole ring gets one random rotation offset so the
   // layout isn't identical every run. Each Black Hole spins in place at
   // its own slow, random speed/direction — it does not travel around Earth.
+  // Each also gets a visible docking-orbit ring at a comfortable distance
+  // from its surface. Uses res/blackhole.png (scaled to match the old
+  // placeholder circle) if it loaded, otherwise falls back to the purple
+  // circle + spin-indicator marker.
   // -----------------------------------------------------------------------
   createBlackHoles() {
     const count = this.blackHoleCount;
     const angleStep = (Math.PI * 2) / count;
     const ringOffset = Math.random() * Math.PI * 2; // rotates the whole ring, keeps even spacing
+    const hasBlackHoleImage = this.textures.exists('blackholeImg');
 
     for (let i = 0; i < count; i++) {
       const id = i + 1;
@@ -223,9 +380,21 @@ class MainScene extends Phaser.Scene {
       const spinDirection = Math.random() < 0.5 ? -1 : 1;
 
       const container = this.add.container(x, y);
-      const body = this.add.circle(0, 0, this.blackHoleRadius, 0x9933ff); // purple
-      const marker = this.add.circle(12, 0, 4, 0xe0c3ff);                 // spin indicator
-      container.add([body, marker]);
+      if (hasBlackHoleImage) {
+        const sprite = this.add.image(0, 0, 'blackholeImg');
+        sprite.setDisplaySize(this.blackHoleRadius * 2, this.blackHoleRadius * 2);
+        container.add(sprite);
+      } else {
+        const body = this.add.circle(0, 0, this.blackHoleRadius, 0x9933ff); // purple
+        const marker = this.add.circle(12, 0, 4, 0xe0c3ff);                 // spin indicator
+        container.add([body, marker]);
+      }
+
+      // Visible orbit ring: shows exactly where the satellite docks around
+      // this Black Hole, comfortably away from its surface.
+      const orbitRing = this.add
+        .circle(x, y, this.blackHoleOrbitRadius)
+        .setStrokeStyle(2, 0xaa66ff, 0.3);
 
       const label = this.add.text(x, y, String(id), {
         fontSize: '14px',
@@ -243,6 +412,7 @@ class MainScene extends Phaser.Scene {
         spinAngle: 0,
         spinSpeed: spinRate * spinDirection,
         container,
+        orbitRing,
         label,
       };
 
@@ -355,7 +525,7 @@ class MainScene extends Phaser.Scene {
         blackHole.y
       );
 
-      if (distance < this.captureRadius) {
+      if (distance < this.blackHoleOrbitRadius) {
         this.captureSatelliteToBlackHole(blackHole);
         return;
       }
@@ -555,6 +725,8 @@ class MainScene extends Phaser.Scene {
 
       blackHole.container.x = blackHole.x;
       blackHole.container.y = blackHole.y;
+      blackHole.orbitRing.x = blackHole.x;
+      blackHole.orbitRing.y = blackHole.y;
       blackHole.label.x = blackHole.x;
       blackHole.label.y = blackHole.y;
 
@@ -579,7 +751,7 @@ const config = {
   height: 600,
   backgroundColor: '#050510',
   parent: 'game-container',
-  scene: [MainScene],
+  scene: [MenuScene, MainScene],
 };
 
 new Phaser.Game(config);
