@@ -191,6 +191,11 @@ class MainScene extends Phaser.Scene {
     this.earthOrbitRadius = 80;     // Default orbit radius when circling Earth
     this.angularSpeed = 1.2;        // Radians per second while orbiting
     this.angle = 0;                 // Current orbital angle (relative to parent)
+    // Time spent continuously orbiting the current parent body, reset on
+    // every new capture. A Black Hole only counts as visited once this
+    // reaches fullRevolutionTime (one complete lap) - see updateSatelliteOrbit.
+    this.orbitTimeAtCurrentBody = 0;
+    this.fullRevolutionTime = (Math.PI * 2) / this.angularSpeed; // seconds for one lap
 
     // --- Satellite flight (state machine) configuration -----------------
     this.satelliteState = SATELLITE_STATE.ORBITING;
@@ -575,6 +580,20 @@ class MainScene extends Phaser.Scene {
     // Face outward from the current parent body.
     const outwardAngle = Math.atan2(y - center.y, x - center.x);
     this.satellite.rotation = outwardAngle + Math.PI / 2;
+
+    // Mission progress: a Black Hole only counts as visited once the
+    // satellite has stayed in orbit around it for one full lap. Checked
+    // continuously (not just at launch) so it's credited the instant the
+    // lap completes, even if the player keeps orbiting past that point.
+    this.orbitTimeAtCurrentBody += delta / 1000;
+    if (
+      this.satelliteCapturedBlackHoleId !== null &&
+      this.satelliteCapturedBlackHoleId === missionSequence[currentMissionIndex] &&
+      this.orbitTimeAtCurrentBody >= this.fullRevolutionTime
+    ) {
+      currentMissionIndex += 1;
+      this.refreshMissionUI();
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -686,6 +705,11 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = blackHole.id;
+    // Docking alone doesn't count as visiting this target - the satellite
+    // must stay in orbit for one full lap (tracked in updateSatelliteOrbit).
+    // Landing on a Black Hole that isn't the active target is still allowed
+    // (an intermediate landing) but can never advance currentMissionIndex.
+    this.orbitTimeAtCurrentBody = 0;
 
     this.thrusterEmitter.stop();
     // explode(count, x, y) doesn't reliably render — position the emitter
@@ -693,12 +717,6 @@ class MainScene extends Phaser.Scene {
     this.burstEmitter.setPosition(this.satellite.x, this.satellite.y);
     this.burstEmitter.explode(24);
 
-    // Mission progress: capturing the current target advances the sequence.
-    // Landing on a Black Hole that isn't the active target is still allowed
-    // (an intermediate landing) but does not advance currentMissionIndex.
-    if (blackHole.id === missionSequence[currentMissionIndex]) {
-      currentMissionIndex += 1;
-    }
     this.refreshMissionUI();
   }
 
@@ -724,6 +742,7 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
+    this.orbitTimeAtCurrentBody = 0;
 
     this.thrusterEmitter.stop();
     // explode(count, x, y) doesn't reliably render — position the emitter
@@ -749,6 +768,7 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
+    this.orbitTimeAtCurrentBody = 0;
     this.thrusterEmitter.stop();
   }
 
@@ -805,8 +825,13 @@ class MainScene extends Phaser.Scene {
   triggerLose(reason) {
     if (this.gameState !== 'PLAYING') return;
     this.gameState = 'LOSE';
-    console.log(`GAME OVER (${reason})`);
-    this.showEndScreen('GAME OVER', 'Press R to Restart');
+    // 'Out of Bounds' is a fatal crash (GAME OVER); 'Launches Exhausted'
+    // means the run ended without completing the mission - e.g. a Black
+    // Hole was left before finishing its required lap - which is a mission
+    // failure (LOSE) rather than a crash.
+    const title = reason === 'Launches Exhausted' ? 'LOSE' : 'GAME OVER';
+    console.log(`${title} (${reason})`);
+    this.showEndScreen(title, 'Press R to Restart');
   }
 
   showEndScreen(title, subtitle) {
@@ -867,6 +892,10 @@ const config = {
   backgroundColor: '#050510',
   parent: 'game-container',
   scene: [MenuScene, MainScene],
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
 };
 
 new Phaser.Game(config);
