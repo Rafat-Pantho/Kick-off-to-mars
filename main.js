@@ -207,12 +207,13 @@ class MainScene extends Phaser.Scene {
     // --- Black hole configuration ---------------------------------------
     // Black Holes sit at fixed positions relative to Earth (they do not
     // orbit); they only spin in place around their own center. All 8 sit
-    // on a single ring, 1.5x Earth's diameter out from Earth's surface,
-    // evenly spaced around it so none ever overlap or sit close together.
+    // on a single ring, well out from Earth's surface (4.5x Earth's
+    // diameter, comfortable on the larger 1920x1080 canvas), evenly spaced
+    // around it so none ever overlap or sit close together.
     this.blackHoleCount = 8;
     this.blackHoleRadius = 20;      // Drawn radius of each Black Hole's circle placeholder
     this.blackHoleDistanceFromCenter =
-      this.earthRadius + 1.5 * (this.earthRadius * 2); // surface + 1.5x Earth's diameter
+      this.earthRadius + 4.5 * (this.earthRadius * 2); // surface + 4.5x Earth's diameter
     this.blackHoleOrbitRadius = this.blackHoleRadius + 30; // satellite's docking ring: 30px out from the surface
     this.blackHoles = [];           // Populated in create()
 
@@ -238,12 +239,23 @@ class MainScene extends Phaser.Scene {
 
   create() {
     // -------------------------------------------------------------------
+    // Particle system setup: a shared 1-bit dot texture (generated once,
+    // no external art needed) feeds three emitters — an ambient starfield
+    // backdrop, a rocket-exhaust trail while FLYING, and a one-shot burst
+    // on capture. Created first so the starfield naturally renders behind
+    // everything added after it.
+    // -------------------------------------------------------------------
+    this.createParticleTextures();
+    this.createStarfield();
+    this.createFlightParticles();
+
+    // -------------------------------------------------------------------
     // Earth: uses res/earth.png (scaled to the same diameter as the old
     // placeholder circle) if it loaded, otherwise falls back to a blue
     // circle with a small offset "landmass" marker so its own-axis spin
     // is still visible. Its position is fixed.
     // -------------------------------------------------------------------
-    this.earth = { x: 400, y: 300 };
+    this.earth = { x: this.scale.width / 2, y: this.scale.height / 2 };
 
     this.earthContainer = this.add.container(this.earth.x, this.earth.y);
     if (this.textures.exists('earthImg')) {
@@ -315,7 +327,7 @@ class MainScene extends Phaser.Scene {
     // -------------------------------------------------------------------
     this.missionText = this.add.text(16, 16, '', {
       fontFamily: 'monospace',
-      fontSize: '16px',
+      fontSize: '26px',
       color: '#e6ecff',
       backgroundColor: 'rgba(5, 5, 16, 0.55)',
       padding: { x: 8, y: 6 },
@@ -326,7 +338,7 @@ class MainScene extends Phaser.Scene {
 
     // Screen-space end-of-game overlay ("MISSION SUCCESS" / "GAME OVER"),
     // hidden until a win or loss is triggered.
-    this.endScreenText = this.add.text(400, 300, '', {
+    this.endScreenText = this.add.text(this.scale.width / 2, this.scale.height / 2, '', {
       fontFamily: 'monospace',
       fontSize: '32px',
       color: '#ffffff',
@@ -420,6 +432,84 @@ class MainScene extends Phaser.Scene {
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Generates the shared 8x8 white dot texture used by every particle
+  // emitter (starfield, exhaust trail, capture burst). Tinted per-emitter
+  // at emit time, so one texture covers all three effects. Guarded so it's
+  // safe to call again if create() ever re-runs.
+  // -----------------------------------------------------------------------
+  createParticleTextures() {
+    if (this.textures.exists('particleDot')) return;
+
+    const g = this.make.graphics({ x: 0, y: 0, add: false });
+    g.fillStyle(0xffffff, 1);
+    g.fillCircle(4, 4, 4);
+    g.generateTexture('particleDot', 8, 8);
+    g.destroy();
+  }
+
+  // -----------------------------------------------------------------------
+  // Ambient background: faint, slow-drifting particles scattered across the
+  // whole canvas as a twinkling starfield. Purely decorative, always
+  // running (even on the end screen), sent behind every other game object.
+  // -----------------------------------------------------------------------
+  createStarfield() {
+    this.starEmitter = this.add.particles(0, 0, 'particleDot', {
+      x: { min: 0, max: this.scale.width },
+      y: { min: 0, max: this.scale.height },
+      lifespan: { min: 4000, max: 8000 },
+      speedX: { min: -4, max: 4 },
+      speedY: { min: -4, max: 4 },
+      scale: { min: 0.15, max: 0.45 },
+      alpha: { start: 0.9, end: 0 },
+      quantity: 1,
+      frequency: 120,
+      tint: 0xaad4ff,
+      blendMode: 'ADD',
+    });
+    this.starEmitter.setDepth(-10);
+  }
+
+  // -----------------------------------------------------------------------
+  // Gameplay-coupled particle effects on the satellite:
+  //  - thrusterEmitter: a continuous exhaust trail, active only while
+  //    FLYING, following the satellite and pointed back along its travel
+  //    direction (set at launch time, since velocity is constant in flight).
+  //  - burstEmitter: a one-shot radial burst fired at the exact capture
+  //    point when the satellite docks at a Black Hole or Earth.
+  // Both start stopped/idle and are driven explicitly from the satellite
+  // state machine (launchSatellite / captureSatelliteTo*).
+  // -----------------------------------------------------------------------
+  createFlightParticles() {
+    // Starts with `emitting: false` (rather than emitting immediately and
+    // calling `.stop()` afterward) — a Phaser quirk means an emitter that's
+    // stopped before it has ever emitted a single particle never properly
+    // resumes rendering on a later `.start()`.
+    this.thrusterEmitter = this.add.particles(0, 0, 'particleDot', {
+      speed: { min: 30, max: 90 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.6, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: { min: 200, max: 400 },
+      frequency: 20,
+      tint: [0xffcc55, 0xff6622],
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    this.thrusterEmitter.setDepth(5);
+
+    this.burstEmitter = this.add.particles(0, 0, 'particleDot', {
+      speed: { min: 80, max: 220 },
+      scale: { start: 0.7, end: 0 },
+      alpha: { start: 1, end: 0 },
+      lifespan: 450,
+      tint: 0x99e6ff,
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    this.burstEmitter.setDepth(5);
+  }
+
   update(time, delta) {
     // Restart works even while the simulation is frozen on an end screen.
     if (Phaser.Input.Keyboard.JustDown(this.restartKey) && this.gameState !== 'PLAYING') {
@@ -500,6 +590,17 @@ class MainScene extends Phaser.Scene {
 
     this.satelliteVelocity = { x: vx, y: vy };
     this.satelliteState = SATELLITE_STATE.FLYING;
+
+    // Exhaust trail: point back along the travel direction (opposite of
+    // `this.angle`) and follow the satellite for the rest of the flight.
+    // Mutates the angle EmitterOp's value directly rather than calling the
+    // emitter's own `setAngle()` — that method silently breaks the
+    // emitter's rendering afterward (a Phaser 3.70 quirk), even though the
+    // underlying op it should be updating works fine when set directly.
+    const trailAngleDeg = Phaser.Math.RadToDeg(this.angle) + 180;
+    this.thrusterEmitter.ops.angle.propertyValue = { min: trailAngleDeg - 20, max: trailAngleDeg + 20 };
+    this.thrusterEmitter.startFollow(this.satellite);
+    this.thrusterEmitter.start();
 
     launchesLeft -= 1;
     this.refreshMissionUI();
@@ -586,6 +687,12 @@ class MainScene extends Phaser.Scene {
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = blackHole.id;
 
+    this.thrusterEmitter.stop();
+    // explode(count, x, y) doesn't reliably render — position the emitter
+    // first and explode with no coordinate args instead.
+    this.burstEmitter.setPosition(this.satellite.x, this.satellite.y);
+    this.burstEmitter.explode(24);
+
     // Mission progress: capturing the current target advances the sequence.
     // Landing on a Black Hole that isn't the active target is still allowed
     // (an intermediate landing) but does not advance currentMissionIndex.
@@ -617,6 +724,13 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
+
+    this.thrusterEmitter.stop();
+    // explode(count, x, y) doesn't reliably render — position the emitter
+    // first and explode with no coordinate args instead.
+    this.burstEmitter.setPosition(this.satellite.x, this.satellite.y);
+    this.burstEmitter.explode(24);
+
     this.refreshMissionUI();
 
     if (currentMissionIndex === missionSequence.length) {
@@ -635,6 +749,7 @@ class MainScene extends Phaser.Scene {
     this.satelliteVelocity = { x: 0, y: 0 };
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
+    this.thrusterEmitter.stop();
   }
 
   // -----------------------------------------------------------------------
@@ -747,8 +862,8 @@ class MainScene extends Phaser.Scene {
 // ---------------------------------------------------------------------------
 const config = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  width: 1920,
+  height: 1080,
   backgroundColor: '#050510',
   parent: 'game-container',
   scene: [MenuScene, MainScene],
