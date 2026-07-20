@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- user-scalable=no / maximum-scale=1.0 stop Android Chrome from
+       double-tap-zooming instead of passing the tap to the game. -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Kick Off to Mars - Orbital Mechanics Demo</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
@@ -11,6 +14,15 @@
   <!-- <div id="game-container">
     <div id="hud">Press SPACE to launch the satellite</div>
   </div> -->
+
+  <!-- Shown only on touch devices held in portrait. The game is a fixed
+       16:9 canvas, so portrait squeezes it into an unplayably small strip;
+       CSS alone toggles this (see style.css) so no game code is involved. -->
+  <div id="rotate-notice">
+    <div class="rotate-icon">📱</div>
+    <div class="rotate-title">ROTATE YOUR DEVICE</div>
+    <div class="rotate-text">Kick Off to Mars is best played in landscape.</div>
+  </div>
 
   <script src="main.js"></script>
 </body>

@@ -5,6 +5,16 @@ html, body {
   height: 100%;
   background-color: #050510;
   overflow: hidden;
+
+  /* Touch/mobile: hand every gesture to the game instead of letting the
+     browser scroll, pinch-zoom, pull-to-refresh, flash a tap highlight, or
+     start a text selection on long-press. Without these, taps on Android
+     Chrome get swallowed by browser chrome behaviour. */
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 body {
@@ -22,8 +32,57 @@ body {
   box-shadow: 0 0 40px rgba(60, 100, 255, 0.25);
 }
 
-#game-container canvas {
+#game-container canvas,
+body > canvas {
   display: block;
+  touch-action: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Rotate-to-landscape notice (mobile only)
+   The game canvas is a fixed 16:9 1920x1080 that Phaser scales with FIT, so a
+   portrait phone shrinks it to a thin, unplayable strip. Cover the screen and
+   ask for landscape instead. Gated on `pointer: coarse` so a narrow *desktop*
+   window never triggers it - only actual touch devices.
+   --------------------------------------------------------------------------- */
+#rotate-notice {
+  display: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate-notice {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 24px;
+    text-align: center;
+    background-color: #050510;
+    font-family: monospace;
+  }
+
+  .rotate-icon {
+    font-size: 56px;
+    transform: rotate(90deg);
+  }
+
+  .rotate-title {
+    font-size: 22px;
+    font-weight: bold;
+    color: #66ddff;
+    letter-spacing: 0.05em;
+  }
+
+  .rotate-text {
+    font-size: 15px;
+    color: #c7d0f0;
+    max-width: 22em;
+    line-height: 1.5;
+  }
 }
 
 #hud {

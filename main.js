@@ -177,7 +177,7 @@ class StoryScene extends Phaser.Scene {
     // Continue prompt: blinking text, triggered by SPACE or a click/tap.
     // -------------------------------------------------------------------
     const continueText = this.add
-      .text(centerX, y + 10, 'PRESS SPACE TO CONTINUE', {
+      .text(centerX, y + 10, 'PRESS SPACE OR TAP TO CONTINUE', {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: '#66ddff',
@@ -197,7 +197,9 @@ class StoryScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    continueText.on('pointerdown', () => this.scene.start('MenuScene'));
+    // Advance on a tap anywhere on screen, not just on the prompt itself -
+    // the prompt is a small target on a phone.
+    this.input.on('pointerdown', () => this.scene.start('MenuScene'));
 
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
@@ -296,7 +298,7 @@ class MenuScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5);
 
     this.add
-      .text(centerX, previewY + 228, 'SPACE — Launch     R — Restart', {
+      .text(centerX, previewY + 228, 'SPACE or TAP — Launch     R or TAP — Restart', {
         fontFamily: 'monospace',
         fontSize: '15px',
         color: '#a9b6e8',
@@ -307,7 +309,7 @@ class MenuScene extends Phaser.Scene {
     // Start prompt: blinking text, triggered by SPACE or a click/tap.
     // -------------------------------------------------------------------
     const startText = this.add
-      .text(centerX, previewY + 280, 'PRESS SPACE TO START', {
+      .text(centerX, previewY + 280, 'PRESS SPACE OR TAP TO START', {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: '#66ddff',
@@ -325,7 +327,9 @@ class MenuScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
-    startText.on('pointerdown', () => this.scene.start('MainScene'));
+    // Start on a tap anywhere on screen, not just on the prompt itself -
+    // the prompt is a small target on a phone.
+    this.input.on('pointerdown', () => this.scene.start('MainScene'));
 
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
   }
@@ -501,7 +505,7 @@ class MainScene extends Phaser.Scene {
     // -------------------------------------------------------------------
     this.missionText = this.add.text(16, 16, '', {
       fontFamily: 'monospace',
-      fontSize: '26px',
+      fontSize: '32px',
       color: '#e6ecff',
       backgroundColor: 'rgba(5, 5, 16, 0.55)',
       padding: { x: 8, y: 6 },
@@ -527,9 +531,31 @@ class MainScene extends Phaser.Scene {
 
     // -------------------------------------------------------------------
     // Input: SPACEBAR launches the satellite out of orbit, R restarts.
+    // Touch/mouse mirrors both so the game is fully playable on a phone
+    // with no keyboard: a tap anywhere launches while playing, and taps
+    // the restart once an end screen is up. The whole screen is the tap
+    // target rather than a small prompt, which matters on small displays.
     // -------------------------------------------------------------------
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+
+    this.input.on('pointerdown', () => {
+      if (this.gameState !== 'PLAYING') {
+        this.restartGame();
+      } else {
+        this.tryLaunchSatellite();
+      }
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Shared entry point for both SPACEBAR and touch/click: launches only if
+  // the satellite is settled in an orbit and a launch is still available.
+  // -----------------------------------------------------------------------
+  tryLaunchSatellite() {
+    if (this.satelliteState === SATELLITE_STATE.ORBITING && launchesLeft > 0) {
+      this.launchSatellite();
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -706,14 +732,10 @@ class MainScene extends Phaser.Scene {
       blackHole.container.rotation = blackHole.spinAngle;
     }
 
-    // Launch the satellite on SPACEBAR, only while it is orbiting and a
-    // launch is available.
-    if (
-      Phaser.Input.Keyboard.JustDown(this.spaceKey) &&
-      this.satelliteState === SATELLITE_STATE.ORBITING &&
-      launchesLeft > 0
-    ) {
-      this.launchSatellite();
+    // Launch the satellite on SPACEBAR (touch is handled by the pointerdown
+    // listener in create(); both funnel through tryLaunchSatellite).
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
+      this.tryLaunchSatellite();
     }
 
     // Drive the Satellite's custom physics state machine.
@@ -1003,7 +1025,7 @@ class MainScene extends Phaser.Scene {
     if (this.gameState !== 'PLAYING') return;
     this.gameState = 'WIN';
     console.log('MISSION SUCCESS');
-    this.showEndScreen('MISSION SUCCESS', 'Press R to Restart');
+    this.showEndScreen('MISSION SUCCESS', 'Press R or Tap to Restart');
   }
 
   triggerLose(reason) {
@@ -1015,7 +1037,7 @@ class MainScene extends Phaser.Scene {
     // failure (LOSE) rather than a crash.
     const title = reason === 'Launches Exhausted' ? 'LOSE' : 'GAME OVER';
     console.log(`${title} (${reason})`);
-    this.showEndScreen(title, 'Press R to Restart');
+    this.showEndScreen(title, 'Press R or Tap to Restart');
   }
 
   showEndScreen(title, subtitle) {
