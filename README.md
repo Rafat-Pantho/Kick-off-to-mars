@@ -69,6 +69,7 @@ Then open `http://localhost:8000` in a browser.
 ├── main.js          # All game logic: scenes, satellite state machine, mission system
 ├── res/              # Art assets (earth.png, blackhole.png) — optional; the game
 │                     # falls back to primitive-shape placeholders if these are missing
+├── audio/            # bg.wav — looping background music (optional; silent if absent)
 └── screenshots/      # Screenshots used in this README
 ```
 
@@ -77,6 +78,7 @@ Then open `http://localhost:8000` in a browser.
 - **No physics engine.** Orbits are parametric (`center + radius * cos/sin(angle)`); flight is straight-line velocity integration (`position += velocity * dt`); capture/proximity checks use `Phaser.Math.Distance.Between`. This keeps every interaction fully deterministic and easy to reason about.
 - **Custom particle effects.** A starfield background, a directional engine exhaust trail (emitted from the middle of the satellite's rear edge, opposite its direction of travel), and a capture burst all share one generated particle texture.
 - **Scene flow:** `StoryScene` (mission briefing) → `MenuScene` (title screen) → `MainScene` (gameplay).
+- **Background music** is a single looping track owned at module scope, not by a scene, so it plays continuously across screen changes instead of restarting. Browsers block audio until the first user gesture, so it begins on the player's first tap or keypress.
 - **Graceful asset fallback:** if `res/earth.png` or `res/blackhole.png` fail to load, the game substitutes simple circle/triangle placeholders instead of breaking.
 
 ## Built With

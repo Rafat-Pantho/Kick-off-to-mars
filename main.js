@@ -62,15 +62,15 @@ function calculateTotalLaunchesAllowed(sequence, blackHoleCount) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared art loading.
-// Every scene that draws Earth or a Black Hole queues these itself, because
-// any scene can be the one that runs first (and scenes don't inherit each
-// other's loads). Keys already in the texture manager are skipped so the
-// loader doesn't warn about duplicates on the second and later scenes.
-// Any file that's missing just 404s on its own request - the loader still
-// completes, and each scene falls back to its primitive-shape placeholder.
+// Shared asset loading.
+// Every scene queues these itself, because any scene can be the one that runs
+// first (and scenes don't inherit each other's loads). Keys already in the
+// cache are skipped so the loader doesn't warn about duplicates on the second
+// and later scenes. Any file that's missing just 404s on its own request - the
+// loader still completes, and the game falls back to its primitive-shape
+// placeholders (or simply stays silent, for the music).
 // ---------------------------------------------------------------------------
-function preloadGameArt(scene) {
+function preloadGameAssets(scene) {
   const art = [
     ['earthImg', 'res/earth.png'],
     ['blackholeImg', 'res/blackhole.png'],
@@ -82,6 +82,35 @@ function preloadGameArt(scene) {
       scene.load.image(key, path);
     }
   }
+
+  if (!scene.cache.audio.exists('bgm')) {
+    scene.load.audio('bgm', 'audio/bg.wav');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Background music.
+// Held at module scope rather than on a scene, because Phaser's sound manager
+// belongs to the *game*, not to any one scene - so a single Sound instance
+// keeps playing seamlessly as scenes start and stop, instead of restarting
+// the track on every screen change.
+//
+// Browsers refuse to play audio before the user has interacted with the page.
+// Phaser handles that: calling play() while its audio context is still locked
+// queues the request, and the first tap/click/keypress unlocks the context and
+// releases the queue. So starting it here just means "begin as soon as the
+// player's first input allows it".
+// ---------------------------------------------------------------------------
+let bgm = null;
+
+function startBackgroundMusic(scene) {
+  // Already running (a previous scene started it), or the file failed to load.
+  if (bgm || !scene.cache.audio.exists('bgm')) {
+    return;
+  }
+
+  bgm = scene.sound.add('bgm', { loop: true, volume: 0.4 });
+  bgm.play();
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +126,15 @@ class StoryScene extends Phaser.Scene {
     super({ key: 'StoryScene' });
   }
 
+  preload() {
+    preloadGameAssets(this);
+  }
+
   create() {
+    // Kick the soundtrack off from the very first screen. It carries through
+    // the menu and gameplay uninterrupted (see startBackgroundMusic).
+    startBackgroundMusic(this);
+
     const centerX = this.scale.width / 2;
     const contentWidth = 1100;
     const leftX = centerX - contentWidth / 2;
@@ -255,10 +292,13 @@ class MenuScene extends Phaser.Scene {
   }
 
   preload() {
-    preloadGameArt(this);
+    preloadGameAssets(this);
   }
 
   create() {
+    // No-op if the briefing screen already started it.
+    startBackgroundMusic(this);
+
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
 
@@ -441,7 +481,7 @@ class MainScene extends Phaser.Scene {
   }
 
   preload() {
-    preloadGameArt(this);
+    preloadGameAssets(this);
   }
 
   create() {
@@ -452,6 +492,9 @@ class MainScene extends Phaser.Scene {
     // on capture. Created first so the starfield naturally renders behind
     // everything added after it.
     // -------------------------------------------------------------------
+    // No-op if an earlier scene already started it.
+    startBackgroundMusic(this);
+
     this.createParticleTextures();
     this.createStarfield();
     this.createFlightParticles();
