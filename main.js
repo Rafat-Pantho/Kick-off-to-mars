@@ -83,8 +83,16 @@ function preloadGameAssets(scene) {
     }
   }
 
-  if (!scene.cache.audio.exists('bgm')) {
-    scene.load.audio('bgm', 'audio/bg.wav');
+  const audio = [
+    ['bgm', 'audio/bg.wav'],
+    ['takeOffSfx', 'audio/take_off.wav'],
+    ['orbitCompleteSfx', 'audio/orbit_complete.wav'],
+  ];
+
+  for (const [key, path] of audio) {
+    if (!scene.cache.audio.exists(key)) {
+      scene.load.audio(key, path);
+    }
   }
 }
 
@@ -444,6 +452,9 @@ class MainScene extends Phaser.Scene {
     // every new capture. A Black Hole only counts as visited once this
     // reaches fullRevolutionTime (one complete lap) - see updateSatelliteOrbit.
     this.orbitTimeAtCurrentBody = 0;
+    // Laps already announced at the current body, so the revolution chime
+    // fires exactly once per completed lap.
+    this.lapsCompletedAtCurrentBody = 0;
     this.fullRevolutionTime = (Math.PI * 2) / this.angularSpeed; // seconds for one lap
 
     // --- Satellite flight (state machine) configuration -----------------
@@ -855,13 +866,34 @@ class MainScene extends Phaser.Scene {
     const outwardAngle = Math.atan2(y - center.y, x - center.x);
     this.satellite.rotation = outwardAngle + Math.PI / 2;
 
+    this.orbitTimeAtCurrentBody += delta / 1000;
+
+    // Everything below is about laps around a Black Hole. The satellite also
+    // orbits Earth (including from the moment a run starts), and that should
+    // never chime or count for anything.
+    if (this.satelliteCapturedBlackHoleId === null) {
+      return;
+    }
+
+    // Revolution chime: fires on every completed lap around any Black Hole,
+    // whether or not it's the current mission target. Derived from a lap
+    // *count* rather than a one-shot flag so a player who keeps circling
+    // gets the cue each time around, and it can never double-fire within
+    // the same lap.
+    const lapsCompleted = Math.floor(this.orbitTimeAtCurrentBody / this.fullRevolutionTime);
+    if (lapsCompleted > this.lapsCompletedAtCurrentBody) {
+      this.lapsCompletedAtCurrentBody = lapsCompleted;
+
+      if (this.cache.audio.exists('orbitCompleteSfx')) {
+        this.sound.play('orbitCompleteSfx', { volume: 0.7 });
+      }
+    }
+
     // Mission progress: a Black Hole only counts as visited once the
     // satellite has stayed in orbit around it for one full lap. Checked
     // continuously (not just at launch) so it's credited the instant the
     // lap completes, even if the player keeps orbiting past that point.
-    this.orbitTimeAtCurrentBody += delta / 1000;
     if (
-      this.satelliteCapturedBlackHoleId !== null &&
       this.satelliteCapturedBlackHoleId === missionSequence[currentMissionIndex] &&
       this.orbitTimeAtCurrentBody >= this.fullRevolutionTime
     ) {
@@ -909,6 +941,13 @@ class MainScene extends Phaser.Scene {
       -Math.sin(this.angle) * this.satelliteTailOffset
     );
     this.thrusterEmitter.start();
+
+    // Engine burn SFX, fired once per launch. Guarded on the cache because a
+    // missing or undecodable file leaves the key absent - the launch itself
+    // must still work, just silently.
+    if (this.cache.audio.exists('takeOffSfx')) {
+      this.sound.play('takeOffSfx', { volume: 0.7 });
+    }
 
     launchesLeft -= 1;
     this.refreshMissionUI();
@@ -999,6 +1038,7 @@ class MainScene extends Phaser.Scene {
     // Landing on a Black Hole that isn't the active target is still allowed
     // (an intermediate landing) but can never advance currentMissionIndex.
     this.orbitTimeAtCurrentBody = 0;
+    this.lapsCompletedAtCurrentBody = 0;
 
     this.thrusterEmitter.stop();
     // explode(count, x, y) doesn't reliably render — position the emitter
@@ -1032,6 +1072,7 @@ class MainScene extends Phaser.Scene {
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
     this.orbitTimeAtCurrentBody = 0;
+    this.lapsCompletedAtCurrentBody = 0;
 
     this.thrusterEmitter.stop();
     // explode(count, x, y) doesn't reliably render — position the emitter
@@ -1058,6 +1099,7 @@ class MainScene extends Phaser.Scene {
     this.satelliteState = SATELLITE_STATE.ORBITING;
     this.satelliteCapturedBlackHoleId = null;
     this.orbitTimeAtCurrentBody = 0;
+    this.lapsCompletedAtCurrentBody = 0;
     this.thrusterEmitter.stop();
   }
 

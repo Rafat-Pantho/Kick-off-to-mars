@@ -69,7 +69,9 @@ Then open `http://localhost:8000` in a browser.
 ├── main.js          # All game logic: scenes, satellite state machine, mission system
 ├── res/              # Art assets (earth.png, blackhole.png) — optional; the game
 │                     # falls back to primitive-shape placeholders if these are missing
-├── audio/            # bg.wav — looping background music (optional; silent if absent)
+├── audio/            # bg.wav (looping music), take_off.wav (launch SFX) and
+│                     # orbit_complete.wav (revolution chime); all optional —
+│                     # the game just runs silent if any are absent
 └── screenshots/      # Screenshots used in this README
 ```
 
