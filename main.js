@@ -120,7 +120,7 @@ class StoryScene extends Phaser.Scene {
       const t = this.add
         .text(leftX, y, text, {
           fontFamily: 'monospace',
-          fontSize: '18px',
+          fontSize: '24px',
           color: '#c7d0f0',
           lineSpacing: 6,
           wordWrap: { width: contentWidth },
@@ -135,7 +135,7 @@ class StoryScene extends Phaser.Scene {
       const t = this.add
         .text(leftX + 24, y, `•  ${text}`, {
           fontFamily: 'monospace',
-          fontSize: '18px',
+          fontSize: '22px',
           color: '#c7d0f0',
           lineSpacing: 6,
           wordWrap: { width: contentWidth - 24 },
@@ -291,7 +291,7 @@ class MenuScene extends Phaser.Scene {
         'Dock the Satellite at every mission target, then return to Earth.',
         {
           fontFamily: 'monospace',
-          fontSize: '15px',
+          fontSize: '24px',
           color: '#a9b6e8',
         }
       )
@@ -300,7 +300,7 @@ class MenuScene extends Phaser.Scene {
     this.add
       .text(centerX, previewY + 228, 'SPACE or TAP — Launch     R or TAP — Restart', {
         fontFamily: 'monospace',
-        fontSize: '15px',
+        fontSize: '24px',
         color: '#a9b6e8',
       })
       .setOrigin(0.5, 0.5);
