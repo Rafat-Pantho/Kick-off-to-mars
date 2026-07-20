@@ -452,14 +452,25 @@ class MainScene extends Phaser.Scene {
       this.satellite = this.add.image(0, 0, 'satelliteImg');
       this.satellite.setDisplaySize(satWidth, satHeight);
     } else {
+      // Points are given in POSITIVE coordinates (0..satWidth, 0..satHeight)
+      // rather than centered ones. Phaser's Triangle derives its size — and
+      // therefore its displayOrigin — from `Math.max` of the supplied point
+      // coords, so negative values yield a wrong origin and the shape draws
+      // offset from its own x/y (the anchor ends up on a corner instead of
+      // the middle). Positive coords give size 16x24, origin (8, 12), which
+      // renders the same triangle correctly centered on x/y.
       this.satellite = this.add.triangle(
         0, 0,                              // position set below
-        0, -satHeight / 2,                 // top point (the "nose")
-        -satWidth / 2, satHeight / 2,      // bottom-left point
-        satWidth / 2, satHeight / 2,       // bottom-right point
+        satWidth / 2, 0,                   // top point (the "nose")
+        0, satHeight,                      // bottom-left point
+        satWidth, satHeight,               // bottom-right point
         0xff3333                           // red
       );
     }
+
+    // Distance from the satellite's center to its tail, so the exhaust trail
+    // can be emitted from the middle of its rear edge rather than its center.
+    this.satelliteTailOffset = satHeight / 2;
 
     // Start orbiting Earth.
     this.satelliteOrbitCenter = this.earth;
@@ -769,14 +780,29 @@ class MainScene extends Phaser.Scene {
     this.satelliteState = SATELLITE_STATE.FLYING;
 
     // Exhaust trail: point back along the travel direction (opposite of
-    // `this.angle`) and follow the satellite for the rest of the flight.
-    // Mutates the angle EmitterOp's value directly rather than calling the
-    // emitter's own `setAngle()` — that method silently breaks the
-    // emitter's rendering afterward (a Phaser 3.70 quirk), even though the
-    // underlying op it should be updating works fine when set directly.
+    // `this.angle`), emitted from the satellite's exact center, and follow
+    // the satellite for the rest of the flight.
+    // Mutates the angle EmitterOp's `start`/`end` directly rather than
+    // calling the emitter's own `setAngle()` — that method silently breaks
+    // the emitter's rendering afterward (a Phaser 3.70 quirk). Note this is
+    // NOT `propertyValue` (that field is only a stored copy for toJSON()
+    // and isn't read by the random-range emit logic, which pulls from
+    // `start`/`end` — setting only `propertyValue` silently no-ops and
+    // leaves the emitter on its original 0-360 default range).
     const trailAngleDeg = Phaser.Math.RadToDeg(this.angle) + 180;
-    this.thrusterEmitter.ops.angle.propertyValue = { min: trailAngleDeg - 20, max: trailAngleDeg + 20 };
-    this.thrusterEmitter.startFollow(this.satellite);
+    this.thrusterEmitter.ops.angle.start = trailAngleDeg - 20;
+    this.thrusterEmitter.ops.angle.end = trailAngleDeg + 20;
+
+    // Follow the middle of the satellite's rear edge, not its center: step
+    // back from the center by half the satellite's length, opposite the
+    // travel direction. startFollow's offset is in unrotated world axes, but
+    // the flight direction is fixed at launch, so computing it once here
+    // keeps the trail pinned to the tail for the whole flight.
+    this.thrusterEmitter.startFollow(
+      this.satellite,
+      -Math.cos(this.angle) * this.satelliteTailOffset,
+      -Math.sin(this.angle) * this.satelliteTailOffset
+    );
     this.thrusterEmitter.start();
 
     launchesLeft -= 1;
