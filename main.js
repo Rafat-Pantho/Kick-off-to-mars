@@ -62,6 +62,29 @@ function calculateTotalLaunchesAllowed(sequence, blackHoleCount) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared art loading.
+// Every scene that draws Earth or a Black Hole queues these itself, because
+// any scene can be the one that runs first (and scenes don't inherit each
+// other's loads). Keys already in the texture manager are skipped so the
+// loader doesn't warn about duplicates on the second and later scenes.
+// Any file that's missing just 404s on its own request - the loader still
+// completes, and each scene falls back to its primitive-shape placeholder.
+// ---------------------------------------------------------------------------
+function preloadGameArt(scene) {
+  const art = [
+    ['earthImg', 'res/earth.png'],
+    ['blackholeImg', 'res/blackhole.png'],
+    ['satelliteImg', 'res/satellite.png'],
+  ];
+
+  for (const [key, path] of art) {
+    if (!scene.textures.exists(key)) {
+      scene.load.image(key, path);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Story / Mission Briefing Scene
 // The game's actual entry point: a text-only briefing screen setting up the
 // premise before handing off to the Menu. Purely presentational - no game
@@ -231,6 +254,10 @@ class MenuScene extends Phaser.Scene {
     super({ key: 'MenuScene' });
   }
 
+  preload() {
+    preloadGameArt(this);
+  }
+
   create() {
     const centerX = this.scale.width / 2;
     const centerY = this.scale.height / 2;
@@ -241,10 +268,20 @@ class MenuScene extends Phaser.Scene {
     // -------------------------------------------------------------------
     const previewY = centerY - 120;
 
+    const previewEarthRadius = 36;
     const earthContainer = this.add.container(centerX, previewY);
-    const earthBody = this.add.circle(0, 0, 36, 0x2266ff);
-    const earthMarker = this.add.circle(16, 0, 5, 0x66ddff);
-    earthContainer.add([earthBody, earthMarker]);
+
+    if (this.textures.exists('earthImg')) {
+      const earthSprite = this.add.image(0, 0, 'earthImg');
+      earthSprite.setDisplaySize(previewEarthRadius * 2, previewEarthRadius * 2);
+      earthContainer.add(earthSprite);
+    } else {
+      // Fallback: flat circle plus a marker dot, so the spin stays readable
+      // on a shape that has no other visual detail.
+      const earthBody = this.add.circle(0, 0, previewEarthRadius, 0x2266ff);
+      const earthMarker = this.add.circle(16, 0, 5, 0x66ddff);
+      earthContainer.add([earthBody, earthMarker]);
+    }
     this.tweens.add({
       targets: earthContainer,
       rotation: Math.PI * 2,
@@ -254,15 +291,25 @@ class MenuScene extends Phaser.Scene {
     });
 
     const previewBlackHoleCount = 4;
-    const previewRadius = 100;
+    const previewRadius = 130;
+    const previewHoleRadius = 26;
+    const hasBlackHoleImage = this.textures.exists('blackholeImg');
+
     for (let i = 0; i < previewBlackHoleCount; i++) {
       const angle = (Math.PI * 2 * i) / previewBlackHoleCount;
       const x = centerX + previewRadius * Math.cos(angle);
       const y = previewY + previewRadius * Math.sin(angle);
       const holeContainer = this.add.container(x, y);
-      const holeBody = this.add.circle(0, 0, 14, 0x9933ff);
-      const holeMarker = this.add.circle(8, 0, 3, 0xe0c3ff);
-      holeContainer.add([holeBody, holeMarker]);
+
+      if (hasBlackHoleImage) {
+        const holeSprite = this.add.image(0, 0, 'blackholeImg');
+        holeSprite.setDisplaySize(previewHoleRadius * 2, previewHoleRadius * 2);
+        holeContainer.add(holeSprite);
+      } else {
+        const holeBody = this.add.circle(0, 0, previewHoleRadius, 0x9933ff);
+        const holeMarker = this.add.circle(8, 0, 3, 0xe0c3ff);
+        holeContainer.add([holeBody, holeMarker]);
+      }
       this.tweens.add({
         targets: holeContainer,
         rotation: Math.PI * 2 * (i % 2 === 0 ? 1 : -1),
@@ -276,7 +323,7 @@ class MenuScene extends Phaser.Scene {
     // Title and instructions.
     // -------------------------------------------------------------------
     this.add
-      .text(centerX, previewY + 150, 'KICK OFF TO MARS', {
+      .text(centerX, previewY + 210, 'KICK OFF TO MARS', {
         fontFamily: 'monospace',
         fontSize: '40px',
         color: '#ffffff',
@@ -287,7 +334,7 @@ class MenuScene extends Phaser.Scene {
     this.add
       .text(
         centerX,
-        previewY + 200,
+        previewY + 262,
         'Dock the Satellite at every mission target, then return to Earth.',
         {
           fontFamily: 'monospace',
@@ -298,7 +345,7 @@ class MenuScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5);
 
     this.add
-      .text(centerX, previewY + 228, 'SPACE or TAP — Launch     R or TAP — Restart', {
+      .text(centerX, previewY + 292, 'SPACE or TAP — Launch     R or TAP — Restart', {
         fontFamily: 'monospace',
         fontSize: '24px',
         color: '#a9b6e8',
@@ -309,7 +356,7 @@ class MenuScene extends Phaser.Scene {
     // Start prompt: blinking text, triggered by SPACE or a click/tap.
     // -------------------------------------------------------------------
     const startText = this.add
-      .text(centerX, previewY + 280, 'PRESS SPACE OR TAP TO START', {
+      .text(centerX, previewY + 348, 'PRESS SPACE OR TAP TO START', {
         fontFamily: 'monospace',
         fontSize: '20px',
         color: '#66ddff',
@@ -393,15 +440,8 @@ class MainScene extends Phaser.Scene {
     this.gameState = 'PLAYING';
   }
 
-  // -----------------------------------------------------------------------
-  // Attempts to load the real art from res/. Any file that's missing just
-  // fails its individual request (404) - the loader still completes and
-  // create() falls back to the primitive-shape placeholders for that asset.
-  // -----------------------------------------------------------------------
   preload() {
-    this.load.image('earthImg', 'res/earth.png');
-    this.load.image('blackholeImg', 'res/blackhole.png');
-    this.load.image('satelliteImg', 'res/satellite.png');
+    preloadGameArt(this);
   }
 
   create() {
