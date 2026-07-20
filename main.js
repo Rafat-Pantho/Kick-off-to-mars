@@ -374,7 +374,7 @@ class MainScene extends Phaser.Scene {
     // diameter, comfortable on the larger 1920x1080 canvas), evenly spaced
     // around it so none ever overlap or sit close together.
     this.blackHoleCount = 8;
-    this.blackHoleRadius = 20;      // Drawn radius of each Black Hole's circle placeholder
+    this.blackHoleRadius = 50;      // Drawn radius of each Black Hole's circle placeholder
     this.blackHoleDistanceFromCenter =
       this.earthRadius + 4.5 * (this.earthRadius * 2); // surface + 4.5x Earth's diameter
     this.blackHoleOrbitRadius = this.blackHoleRadius + 30; // satellite's docking ring: 30px out from the surface
@@ -583,7 +583,7 @@ class MainScene extends Phaser.Scene {
         .setStrokeStyle(2, 0xaa66ff, 0.3);
 
       const label = this.add.text(x, y, String(id), {
-        fontSize: '14px',
+        fontSize: '22px',
         color: '#ffffff',
         fontStyle: 'bold',
       });
